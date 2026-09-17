@@ -1,0 +1,12 @@
+# Built binaries
+/library-mcp
+/cmd/library-mcp/library-mcp
+
+# SQLite databases (created at runtime)
+*.db
+*.db-wal
+*.db-shm
+
+# Go workspace files
+go.work
+go.work.sum
