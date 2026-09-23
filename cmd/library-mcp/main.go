@@ -6,11 +6,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/sophdn/library-mcp/internal/db"
@@ -20,26 +23,64 @@ import (
 // version is the reported server version.
 const version = "0.1.0"
 
+// codeServerClosing is the JSON-RPC error code the SDK surfaces when the
+// transport shuts down. An MCP stdio client stops the server by closing its
+// stdin; the SDK reports that clean end-of-stream as this code wrapping io.EOF.
+// See isCleanShutdown.
+const codeServerClosing = -32004
+
 func main() {
+	if err := run(context.Background(), os.Args[1:], &mcp.StdioTransport{}); err != nil {
+		log.Fatalf("library-mcp: %v", err)
+	}
+}
+
+// run parses flags from args, opens the database, registers the tools, and
+// serves over transport until the connection ends. It returns nil on a clean
+// shutdown — including the client closing stdin (EOF), which is how an MCP
+// stdio client stops a stdio server — and a non-nil error only on a genuine
+// failure. Splitting this out of main keeps os.Exit at the edge so a test can
+// drive a real serve loop and inspect the returned error.
+func run(ctx context.Context, args []string, transport mcp.Transport) error {
+	fs := flag.NewFlagSet("library-mcp", flag.ContinueOnError)
 	defaultDB := os.Getenv("LIBRARY_MCP_DB")
 	if defaultDB == "" {
 		defaultDB = "library.db"
 	}
-	dbPath := flag.String("db", defaultDB, "path to the SQLite database file (env: LIBRARY_MCP_DB)")
-	flag.Parse()
+	dbPath := fs.String("db", defaultDB, "path to the SQLite database file (env: LIBRARY_MCP_DB)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	pool, err := db.Open(*dbPath)
 	if err != nil {
-		log.Fatalf("library-mcp: open database: %v", err)
+		return fmt.Errorf("open database: %w", err)
 	}
 	defer pool.Close()
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "library-mcp", Version: version}, nil)
 	registerTools(server, pool)
 
-	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
-		log.Fatalf("library-mcp: server exited: %v", err)
+	if err := server.Run(ctx, transport); err != nil && !isCleanShutdown(err) {
+		return fmt.Errorf("server exited: %w", err)
 	}
+	return nil
+}
+
+// isCleanShutdown reports whether err is the ordinary end-of-stream signal an
+// MCP stdio client produces when it closes the server's stdin, rather than a
+// genuine transport failure. A clean stdin EOF unwinds through the SDK as a
+// "server is closing" JSON-RPC error (code -32004) wrapping io.EOF; a real
+// read/write fault surfaces as a different error, which stays fatal.
+func isCleanShutdown(err error) bool {
+	if err == nil {
+		return true
+	}
+	var wire *jsonrpc.Error
+	if errors.As(err, &wire) && wire.Code == codeServerClosing {
+		return true
+	}
+	return errors.Is(err, io.EOF)
 }
 
 // ── Tool input and output shapes ──────────────────────────────────────
