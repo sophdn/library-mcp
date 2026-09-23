@@ -80,8 +80,8 @@ go test ./...
 The tests are hermetic. Each opens a fresh temporary database, so they need no
 server and no network.
 
-**Coverage:** the two logic packages hold a 95%+ floor — `internal/library`
-95.9% and `internal/db` 93.0% of statements, 95.6% aggregate over the two.
+**Coverage:** the two logic packages hold a 95% floor **in aggregate** — 95.6%
+over the two (`internal/library` 95.9%, and `internal/db` 93.0% on its own).
 Reproduce with:
 
 ```sh
