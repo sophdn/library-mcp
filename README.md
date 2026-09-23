@@ -4,7 +4,10 @@ A small [Model Context Protocol](https://modelcontextprotocol.io) server that
 keeps a reference library an agent can read and write. Each entry is a card:
 a source, filed under a Dewey number, with notes on what it establishes, the
 question it answers, and when to reach for it. The server speaks MCP over
-stdio and stores everything in a single SQLite file.
+stdio and stores everything in a single SQLite file. Point an agent at one of
+your projects and it fills the library from what it reads, then searches and
+cross-references the cards it filed. See [GETTING-STARTED.md](GETTING-STARTED.md)
+for that walkthrough.
 
 It began as one subsystem inside a larger private agent operating system. This
 repository is that subsystem lifted out on its own, with a fresh MCP front end
