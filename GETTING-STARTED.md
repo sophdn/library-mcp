@@ -62,62 +62,79 @@ You can drive the server directly by speaking its wire protocol on stdin and
 reading replies on stdout. This proves one write and one read without any MCP
 client wired up.
 
+### Build a runnable binary first
+
+```sh
+go build -o /tmp/library-mcp ./cmd/library-mcp
+```
+
+Drive this built binary, not `go run` — a first-time `go run` compiles before it
+starts, and that compile can outlast the short timing the runs below rely on.
+
 ### How the wire works
 
-- **Framing is newline-delimited JSON**: one complete JSON-RPC message per
-  line, and one line per message.
+- **Framing is newline-delimited JSON**: one complete JSON-RPC message per line,
+  and one line per message.
 - **A handshake is mandatory before any tool call.** You must send an
   `initialize` request and then a `notifications/initialized` notification.
-  Only after that will the server accept a `tools/call`. Skipping the handshake
-  gets your tool call rejected.
-- **stdin must stay open.** The server shuts down the moment its stdin reaches
-  end-of-file. If you pipe a fixed batch of lines in — `printf '…' | library-mcp`
-  — stdin closes as soon as the last line is read, and the server exits before
-  it flushes any replies, so you see nothing. Keep stdin open past the last
-  message (the snippet below does this with a trailing `sleep`).
-- **Requests are handled concurrently**, so a read fired immediately after a
-  write can race ahead of it. Leave a brief gap between the write and the read
-  (the snippet does this too) so the card is committed before you fetch it.
+  Only after that will the server accept a `tools/call`.
+- **stdin must stay open until the replies arrive.** The server shuts down when
+  its stdin reaches end-of-file, so a bare `printf '…' | library-mcp` can close
+  stdin before the server flushes its replies. Keep stdin open past the last
+  message with a trailing `sleep`, as the runs below do.
 
-### One write and one read
+### Define the messages
 
-Copy this whole block and run it. It builds four messages — `initialize`, the
-`initialized` acknowledgement, a `library_add` that files a **built-in sample
-card** under Dewey `005.74`, and a `library_get` that reads it back — then feeds
-them to the server on a fresh throwaway database:
+`ADD` files a **built-in sample card** under Dewey `005.74`; `GET` reads it back.
 
 ```sh
 INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}'
 INITD='{"jsonrpc":"2.0","method":"notifications/initialized"}'
 ADD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"library_add","arguments":{"dewey":"005.74","primary_author":"library-mcp sample","citation_raw":"Built-in sample card.","establishes":"A card is a source filed under a Dewey number.","what_it_answers":"What does one library card look like?","invoke_when":"When trying the server for the first time.","index_pointers":[{"section":"Getting started","question":"What does a card look like?","role":"primary"}]}}}'
 GET='{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"library_get","arguments":{"dewey":"005.74"}}}'
-
-{ printf '%s\n' "$INIT" "$INITD" "$ADD"; sleep 0.5; printf '%s\n' "$GET"; sleep 0.5; } \
-  | go run ./cmd/library-mcp -db /tmp/library-demo.db
 ```
 
-A good result is three JSON lines on stdout:
+### Write, then read
 
-1. `id:1` — the `initialize` reply, naming the server and its capabilities.
-2. `id:2` — the `library_add` reply, `{"dewey":"005.74"}`, confirming the write.
-3. `id:3` — the `library_get` reply, whose `structuredContent.entry` is the full
-   sample card you just filed.
+Do the write and the read as **two separate runs against the same database
+file**. The card persists to the file, so the second run reads what the first
+wrote, and two separate processes cannot race each other:
 
-If the third line carries the card back, the round trip works: the server
-accepted a write and served the read from the SQLite file. The server exits 0
-on its own when stdin closes, which is the normal way an MCP client stops a
-stdio server.
+```sh
+# Run 1 — write the card
+{ printf '%s\n' "$INIT" "$INITD" "$ADD"; sleep 0.5; } | /tmp/library-mcp -db /tmp/library-demo.db
+
+# Run 2 — read it back from the same file
+{ printf '%s\n' "$INIT" "$INITD" "$GET"; sleep 0.5; } | /tmp/library-mcp -db /tmp/library-demo.db
+```
+
+A good result:
+
+1. Run 1 prints the `initialize` reply (`id:1`) and the `library_add` reply
+   (`id:2`), `{"dewey":"005.74"}`, confirming the write.
+2. Run 2 prints the `initialize` reply and the `library_get` reply (`id:3`),
+   whose `structuredContent.entry` is the full sample card. Because run 2 is a
+   fresh process reading the file, this also proves the write persisted to disk.
+
+Each run exits 0 on its own when stdin closes — the normal way a stdio MCP
+server stops.
+
+### (Optional) Confirm on disk
+
+The cards live in one SQLite table, `library_entries`. The `citation_raw`
+argument is stored in a column named `citation`:
+
+```sh
+sqlite3 /tmp/library-demo.db 'SELECT dewey, status, citation FROM library_entries;'
+```
+
+You should see one row: `005.74|active|Built-in sample card.`
 
 ## 6. (Optional) Register it with an MCP client
 
-To use the server from an agent instead of by hand, point an MCP client at a
-built binary. First build a named binary:
-
-```sh
-go build -o /tmp/library-mcp ./cmd/library-mcp
-```
-
-Then add a server entry to the client's configuration. For Claude Code:
+To use the server from an agent instead of by hand, point an MCP client at the
+binary you built in step 5 (`/tmp/library-mcp`). Add a server entry to the
+client's configuration. For Claude Code:
 
 ```json
 {
