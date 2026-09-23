@@ -9,7 +9,8 @@ result looks like. Stop and report if a check fails.
 
 `library-mcp` is a Model Context Protocol server. It stores a reference library
 in a local SQLite file and exposes eleven tools over stdio. You will build it,
-prove it passes its own tests, run it, and call three tools against it.
+prove it passes its own tests, run it, fill it with cards read from one of the
+user's own projects, and read those cards back.
 
 ## 1. Check the toolchain
 
@@ -87,36 +88,50 @@ Then add a server entry to the client's configuration. For Claude Code:
 Reload the client so it picks up the new server. You should see eleven
 `library_*` tools become available.
 
-## 7. Exercise three tools
+## 7. Fill the shelves from one of the user's projects
 
-Call these in order and confirm each result.
+The library starts empty. Now put real cards on it. Ask the user to point you at
+one of their own local projects — an app, a library, whatever is handy — or pick
+one they already have open. Read it and record what a future agent would want to
+know about it: one card per load-bearing decision or main module.
 
-1. **Add a card** with `library_add`:
+For each card, call `library_add`. Give it a Dewey number that groups the topic,
+the source you read as the citation, the three short notes (`establishes`,
+`what_it_answers`, `invoke_when`), and at least one index pointer so section
+search and cross-referencing have something to work with. Here is a card built
+from a project's decision to store state in SQLite:
 
-   ```json
-   {
-     "dewey": "005.1",
-     "primary_author": "Brooks",
-     "citation_raw": "Brooks, F. (1975). The Mythical Man-Month.",
-     "year": 1975,
-     "establishes": "Adding people to a late project makes it later.",
-     "what_it_answers": "Why does adding staff slow a late project?",
-     "invoke_when": "When someone proposes adding people to recover a slipping schedule.",
-     "tags": ["software", "management"],
-     "index_pointers": [
-       {"section": "Estimation", "question": "Does more staff mean faster delivery?", "role": "primary"}
-     ]
-   }
-   ```
+```json
+{
+  "dewey": "005.74",
+  "primary_author": "project ADR-003",
+  "citation_raw": "docs/adr/003-persistence.md",
+  "establishes": "The service stores its state in one SQLite file, with no separate database server.",
+  "what_it_answers": "Why is there no database server in this stack?",
+  "invoke_when": "When someone proposes adding a database server, or questions the persistence choice.",
+  "tags": ["persistence"],
+  "index_pointers": [
+    {"section": "Persistence", "question": "What stores the service's state?", "role": "primary"}
+  ]
+}
+```
 
-   A good result names the Dewey number `005.1`.
+Add a handful — five to ten cards covering the project's main decisions and
+modules. Vary the section names, so the next step has something to group.
 
-2. **Fetch it back** with `library_get`, argument `{"dewey": "005.1"}`. The
-   result should be the card you just added, with the author `Brooks` and the
-   year `1975`.
+## 8. Read the shelf back
 
-3. **List the sections** with `library_list_sections`, argument `{}`. The
-   result should include `Estimation`.
+Now use what you filed:
 
-If all three behave as described, the server works. Report success, the Go
-version you used, and anything that surprised you.
+1. **Search** with `library_find`, argument
+   `{"mode": "keyword", "query": "SQLite"}`. It returns the cards whose text
+   matches.
+2. **List the sections** with `library_list_sections`, argument `{}`. It returns
+   the section names you created, such as `Persistence`.
+3. **Cross-reference** with `library_cross_reference`, argument
+   `{"dewey": "005.74", "mode": "section"}`. It returns the other cards that
+   share a section with that one.
+
+If the cards you filed come back, the library works as a reference an agent
+builds up from a real codebase and then queries. Report what you filed, what the
+searches returned, and anything that surprised you.
