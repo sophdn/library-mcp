@@ -80,13 +80,17 @@ go test ./...
 The tests are hermetic. Each opens a fresh temporary database, so they need no
 server and no network.
 
-**Coverage:** the two logic packages carry `internal/library` 95.9% and
-`internal/db` 93.0% of statements, 95.6% aggregate over the two (the pure test
-helper `internal/testutil` is excluded). Reproduce with:
+**Coverage:** the two logic packages hold a 95%+ floor — `internal/library`
+95.9% and `internal/db` 93.0% of statements, 95.6% aggregate over the two.
+Reproduce with:
 
 ```sh
-go test ./... -coverprofile=cover.out && go tool cover -func=cover.out | tail -1
+go test ./internal/db ./internal/library -coverprofile=cover.out && go tool cover -func=cover.out | tail -1
 ```
+
+A whole-tree `go test ./...` reports a lower figure (about 93%): the pure test
+helper `internal/testutil` counts as 0% and the server `main` carries an
+unreachable exit path. The logic-package aggregate above is the meaningful number.
 
 ## License
 
