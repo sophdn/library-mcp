@@ -9,6 +9,9 @@ your projects and it fills the library from what it reads, then searches and
 cross-references the cards it filed. See [GETTING-STARTED.md](GETTING-STARTED.md)
 for that walkthrough.
 
+> Not related to [lethain/library-mcp](https://github.com/lethain/library-mcp),
+> a separate MCP server for Markdown knowledge bases.
+
 It began as one subsystem inside a larger private agent operating system. This
 repository is that subsystem lifted out on its own, with a fresh MCP front end
 and its own database schema, so it builds and runs with nothing else attached.
