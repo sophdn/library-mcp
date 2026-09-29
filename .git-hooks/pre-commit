@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # language-drift gate — fail a commit that ADDS a secondary-language code file
-# outside this repo's .language-policy.toml carve-outs. Owned by corpos-toolkit
-# (chain primary-language-policy-and-drift-gate); needs corpos-gate on PATH.
+# outside this repo's .language-policy.toml carve-outs. Requires corpos-gate on PATH.
 set -euo pipefail
 if command -v corpos-gate >/dev/null 2>&1; then
   exec corpos-gate langpolicy
