@@ -60,7 +60,7 @@ go run ./cmd/library-mcp -db ./library.db
 
 The database path comes from the `-db` flag or the `LIBRARY_MCP_DB`
 environment variable, and defaults to `library.db` in the working directory.
-The file is created on first run.
+The database file is created on first run.
 
 To register the server with an MCP client, point the client at the built
 binary. For example, in a Claude Code configuration:
