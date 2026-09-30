@@ -40,7 +40,7 @@ and its own database schema, so it builds and runs with nothing else attached.
 | `library_get` | Fetch one card by Dewey. |
 | `library_update` | Change some fields of a card; Dewey stays fixed. |
 | `library_retire` | Retire a card with a reason. |
-| `library_find` | Search: `keyword` substring match, or `semantic` / `manifest` filter by section. |
+| `library_find` | Search cards: `keyword` substring match, or `semantic` / `manifest` filter by section. |
 | `library_cross_reference` | Find cards that share a section, or a `(section, question)` pair. |
 | `library_reproject` | Change a card's project tags (`add`, `remove`, `set`). |
 | `library_list_active` | List active cards in scope for a project (its own plus universal). |
