@@ -97,6 +97,12 @@ A whole-tree `go test ./...` reports a lower figure (about 93%): the pure test
 helper `internal/testutil` counts as 0% and the server `main` carries an
 unreachable exit path. The logic-package aggregate above is the meaningful number.
 
+## Privacy
+
+library-mcp runs locally and collects nothing. It stores your cards in a local
+SQLite file, makes no network calls, and sends no data to anyone. See
+[PRIVACY.md](PRIVACY.md).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
