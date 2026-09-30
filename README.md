@@ -1,5 +1,7 @@
 # library-mcp
 
+[![M8ven Score](https://m8ven.ai/badge/mcp/sophdn/library-mcp)](https://m8ven.ai/mcp/sophdn/library-mcp)
+
 A small [Model Context Protocol](https://modelcontextprotocol.io) server that
 keeps a reference library an agent can read and write. Each entry is a card:
 a source, filed under a Dewey number, with notes on what it establishes, the
