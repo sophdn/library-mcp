@@ -189,6 +189,11 @@ type listDeweyOutput struct {
 	Count        int      `json:"count"`
 }
 
+// ptr returns a pointer to v. The MCP tool hints DestructiveHint and
+// OpenWorldHint are *bool, so a deliberate false serializes into the tool's
+// annotations; a nil pointer would be omitted. ptr lets a tool set them inline.
+func ptr[T any](v T) *T { return &v }
+
 // ── Registration ──────────────────────────────────────────────────────
 
 // registerTools installs the eleven library_* tools on the server, each
@@ -198,6 +203,12 @@ func registerTools(server *mcp.Server, pool *db.Pool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "library_add",
 		Description: "Add a card to the library under a globally unique Dewey number. Refuses a duplicate Dewey.",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    false,
+			DestructiveHint: ptr(false),
+			IdempotentHint:  false,
+			OpenWorldHint:   ptr(false),
+		},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in addInput) (*mcp.CallToolResult, deweyOutput, error) {
 		entry := library.LibraryEntry{
 			Dewey:         in.Dewey,
@@ -219,6 +230,12 @@ func registerTools(server *mcp.Server, pool *db.Pool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "library_get",
 		Description: "Fetch one card by its Dewey number. Dewey is the card's global identity, so no project is needed.",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    true,
+			DestructiveHint: ptr(false),
+			IdempotentHint:  true,
+			OpenWorldHint:   ptr(false),
+		},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in getInput) (*mcp.CallToolResult, getOutput, error) {
 		entry, err := library.Get(ctx, pool, in.Dewey)
 		if err != nil {
@@ -230,6 +247,12 @@ func registerTools(server *mcp.Server, pool *db.Pool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "library_update",
 		Description: "Apply a partial update to a card, addressed by its Dewey number. Dewey itself is immutable.",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    false,
+			DestructiveHint: ptr(true),
+			IdempotentHint:  true,
+			OpenWorldHint:   ptr(false),
+		},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in updateInput) (*mcp.CallToolResult, updateOutput, error) {
 		res, err := library.Update(ctx, pool, in.Dewey, in.Update)
 		if err != nil {
@@ -241,6 +264,12 @@ func registerTools(server *mcp.Server, pool *db.Pool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "library_retire",
 		Description: "Retire a card, flipping its status to retired with a reason. Retired cards drop out of the active listings.",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    false,
+			DestructiveHint: ptr(true),
+			IdempotentHint:  false,
+			OpenWorldHint:   ptr(false),
+		},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in retireInput) (*mcp.CallToolResult, deweyOutput, error) {
 		if err := library.Retire(ctx, pool, in.Dewey, in.Reason); err != nil {
 			return nil, deweyOutput{}, err
@@ -251,6 +280,12 @@ func registerTools(server *mcp.Server, pool *db.Pool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "library_find",
 		Description: "Search active cards. keyword mode substring-matches text; semantic and manifest modes filter by section (manifest returns slim rows).",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    true,
+			DestructiveHint: ptr(false),
+			IdempotentHint:  true,
+			OpenWorldHint:   ptr(false),
+		},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in findInput) (*mcp.CallToolResult, findOutput, error) {
 		switch in.Mode {
 		case "keyword":
@@ -288,6 +323,12 @@ func registerTools(server *mcp.Server, pool *db.Pool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "library_cross_reference",
 		Description: "Find other cards that share a section, or a (section, question) pair, with the target Dewey.",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    true,
+			DestructiveHint: ptr(false),
+			IdempotentHint:  true,
+			OpenWorldHint:   ptr(false),
+		},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in crossRefInput) (*mcp.CallToolResult, crossRefOutput, error) {
 		mode := library.CrossRefModeSection
 		if in.Mode == "question" {
@@ -303,6 +344,12 @@ func registerTools(server *mcp.Server, pool *db.Pool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "library_reproject",
 		Description: "Change a card's project tags. add unions tags in, remove deletes them, set replaces the whole set (empty set makes the card universal).",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    false,
+			DestructiveHint: ptr(true),
+			IdempotentHint:  true,
+			OpenWorldHint:   ptr(false),
+		},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in reprojectInput) (*mcp.CallToolResult, reprojectOutput, error) {
 		var mode library.ReprojectMode
 		switch in.Mode {
@@ -328,6 +375,12 @@ func registerTools(server *mcp.Server, pool *db.Pool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "library_list_active",
 		Description: "List active cards in scope for a project: its tagged cards plus every universal card, sorted by Dewey.",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    true,
+			DestructiveHint: ptr(false),
+			IdempotentHint:  true,
+			OpenWorldHint:   ptr(false),
+		},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in projectInput) (*mcp.CallToolResult, entriesOutput, error) {
 		entries, err := library.ListActive(ctx, pool, in.Project)
 		if err != nil {
@@ -339,6 +392,12 @@ func registerTools(server *mcp.Server, pool *db.Pool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "library_list_all",
 		Description: "List every active card across all projects as slim manifest rows.",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    true,
+			DestructiveHint: ptr(false),
+			IdempotentHint:  true,
+			OpenWorldHint:   ptr(false),
+		},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ emptyInput) (*mcp.CallToolResult, listAllOutput, error) {
 		entries, err := library.ListAllManifest(ctx, pool)
 		if err != nil {
@@ -350,6 +409,12 @@ func registerTools(server *mcp.Server, pool *db.Pool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "library_list_sections",
 		Description: "List the distinct section names across a project's active cards, sorted alphabetically.",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    true,
+			DestructiveHint: ptr(false),
+			IdempotentHint:  true,
+			OpenWorldHint:   ptr(false),
+		},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in projectInput) (*mcp.CallToolResult, sectionsOutput, error) {
 		sections, err := library.ListSections(ctx, pool, in.Project)
 		if err != nil {
@@ -361,6 +426,12 @@ func registerTools(server *mcp.Server, pool *db.Pool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "library_list_dewey",
 		Description: "List active Dewey numbers in scope for a project that start with a prefix.",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    true,
+			DestructiveHint: ptr(false),
+			IdempotentHint:  true,
+			OpenWorldHint:   ptr(false),
+		},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listDeweyInput) (*mcp.CallToolResult, listDeweyOutput, error) {
 		numbers, err := library.ListDeweyByPrefix(ctx, pool, in.Project, in.Prefix)
 		if err != nil {
