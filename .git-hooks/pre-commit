@@ -1,8 +1,23 @@
 #!/usr/bin/env bash
-# language-drift gate — fail a commit that ADDS a secondary-language code file
-# outside this repo's .language-policy.toml carve-outs. Requires corpos-gate on PATH.
+# pre-commit gate. Requires corpos-gate on PATH.
+#   langpolicy  fail a commit that ADDS a secondary-language code file outside
+#               this repo's .language-policy.toml carve-outs.
+#   secrets     fail a commit that adds a secret (private key, provider token)
+#               or a term from the maintainer's private denylist. The denylist
+#               is kept OUTSIDE this public repo, at $CORPOS_GATE_PII_DENYLIST
+#               (default ~/.config/corpos-gate/pii-denylist), so the terms it
+#               guards are never published. Without it, secrets only.
+# Waive a false positive by appending "pii-allow" to the line.
 set -euo pipefail
-if command -v corpos-gate >/dev/null 2>&1; then
-  exec corpos-gate langpolicy
+if ! command -v corpos-gate >/dev/null 2>&1; then
+  echo "pre-commit: corpos-gate not on PATH — language-policy and secrets checks skipped" >&2
+  exit 0
 fi
-echo "pre-commit: corpos-gate not on PATH — language-policy check skipped" >&2
+corpos-gate langpolicy
+usage=$(corpos-gate help 2>/dev/null || true)
+if ! grep -q '^  corpos-gate secrets' <<< "$usage"; then
+  echo "pre-commit: this corpos-gate has no secrets subcommand — secrets check skipped" >&2
+  exit 0
+fi
+export CORPOS_GATE_PII_DENYLIST="${CORPOS_GATE_PII_DENYLIST:-$HOME/.config/corpos-gate/pii-denylist}"
+exec corpos-gate secrets
