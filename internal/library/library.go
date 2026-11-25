@@ -535,18 +535,37 @@ func ListSections(ctx context.Context, pool *db.Pool, projectID string) ([]strin
 	return out, nil
 }
 
-// ListDeweyByPrefix returns active deweys in scope for projectID (its tags plus
-// universal) that start with prefix, sorted.
-func ListDeweyByPrefix(ctx context.Context, pool *db.Pool, projectID, prefix string) ([]string, error) {
-	entries, err := ListActive(ctx, pool, projectID)
-	if err != nil {
-		return nil, err
+// ListOccupiedDeweyByPrefix returns every dewey in the catalogue that starts
+// with prefix, across all projects and regardless of status. That is exactly
+// the set Add treats as taken: Add rejects any dewey already present in
+// library_entries (ErrAlreadyExists), with no project or status filter. An
+// agent uses library_list_dewey to pick a free code, so the list must match
+// that global namespace. A project-scoped, active-only view hid codes taken in
+// another project or by a retired card, and Add then collided. Deweys are
+// globally unique, so there are no duplicates; the result is sorted.
+func ListOccupiedDeweyByPrefix(ctx context.Context, pool *db.Pool, prefix string) ([]string, error) {
+	q := `SELECT dewey FROM library_entries`
+	var args []any
+	if prefix != "" {
+		q += ` WHERE dewey LIKE ?`
+		args = append(args, prefix+"%")
 	}
+	q += ` ORDER BY dewey`
+	rows, err := pool.DB().QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("library list_dewey: %w", err)
+	}
+	defer rows.Close()
 	out := []string{}
-	for _, e := range entries {
-		if strings.HasPrefix(e.Dewey, prefix) {
-			out = append(out, e.Dewey)
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			return nil, fmt.Errorf("library list_dewey scan: %w", err)
 		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("library list_dewey rows: %w", err)
 	}
 	return out, nil
 }

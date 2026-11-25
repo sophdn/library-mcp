@@ -264,20 +264,56 @@ func TestListSections_DedupesAcrossEntries(t *testing.T) {
 	}
 }
 
-func TestListDeweyByPrefix(t *testing.T) {
+func TestListOccupiedDeweyByPrefix(t *testing.T) {
 	pool := testutil.NewTestDB(t)
 	setupProject(t, pool)
 	ctx := context.Background()
-	for _, d := range []string{"500.1", "500.2", "510.1"} {
-		_ = Add(ctx, pool, testProject, sampleEntry(d))
+	// The list must reflect exactly what Add rejects: any dewey in
+	// library_entries, in any project, active or retired.
+	for _, d := range []string{"500.1", "500.2"} {
+		if err := Add(ctx, pool, testProject, sampleEntry(d)); err != nil {
+			t.Fatalf("add %s: %v", d, err)
+		}
 	}
-	got, _ := ListDeweyByPrefix(ctx, pool, testProject, "500")
-	if len(got) != 2 || got[0] != "500.1" || got[1] != "500.2" {
-		t.Errorf("prefix 500 mismatch: %v", got)
+	if err := Add(ctx, pool, "other-proj", sampleEntry("500.3")); err != nil {
+		t.Fatalf("add cross-project 500.3: %v", err)
 	}
-	all, _ := ListDeweyByPrefix(ctx, pool, testProject, "")
-	if len(all) != 3 {
-		t.Errorf("empty prefix should return all 3: %v", all)
+	if err := Add(ctx, pool, testProject, sampleEntry("510.1")); err != nil {
+		t.Fatalf("add 510.1: %v", err)
+	}
+	if err := Retire(ctx, pool, "500.2", "test"); err != nil {
+		t.Fatalf("retire 500.2: %v", err)
+	}
+
+	got, err := ListOccupiedDeweyByPrefix(ctx, pool, "500")
+	if err != nil {
+		t.Fatalf("list prefix 500: %v", err)
+	}
+	want := []string{"500.1", "500.2", "500.3"}
+	if len(got) != len(want) {
+		t.Fatalf("prefix 500: got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("prefix 500: got %v want %v", got, want)
+		}
+	}
+
+	// The list and Add agree: a code the list omits is addable; a code it
+	// shows is rejected.
+	if err := Add(ctx, pool, testProject, sampleEntry("500.9")); err != nil {
+		t.Fatalf("500.9 shown free but Add rejected it: %v", err)
+	}
+	if err := Add(ctx, pool, testProject, sampleEntry("500.1")); !errors.Is(err, ErrAlreadyExists) {
+		t.Fatalf("500.1 shown occupied but Add did not reject it: %v", err)
+	}
+
+	all, err := ListOccupiedDeweyByPrefix(ctx, pool, "")
+	if err != nil {
+		t.Fatalf("list all: %v", err)
+	}
+	if len(all) != 5 {
+		t.Fatalf("empty prefix should return all 5: %v", all)
 	}
 }
 

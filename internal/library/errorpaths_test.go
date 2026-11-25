@@ -44,7 +44,7 @@ func TestQueryErrorPaths(t *testing.T) {
 		{"ListAll", func() error { _, err := ListAll(ctx, pool); return err }},
 		{"ListAllManifest", func() error { _, err := ListAllManifest(ctx, pool); return err }},
 		{"ListSections", func() error { _, err := ListSections(ctx, pool, "p"); return err }},
-		{"ListDeweyByPrefix", func() error { _, err := ListDeweyByPrefix(ctx, pool, "p", "5"); return err }},
+		{"ListOccupiedDeweyByPrefix", func() error { _, err := ListOccupiedDeweyByPrefix(ctx, pool, "5"); return err }},
 		{"FindKeyword", func() error { _, err := FindKeyword(ctx, pool, "p", "x"); return err }},
 		{"FindSemantic", func() error { _, err := FindSemantic(ctx, pool, "p", "S"); return err }},
 		{"FindManifest", func() error { _, err := FindManifest(ctx, pool, "p", "S"); return err }},

@@ -179,8 +179,8 @@ type sectionsOutput struct {
 }
 
 type listDeweyInput struct {
-	Project string `json:"project,omitempty" jsonschema:"project scope"`
-	Prefix  string `json:"prefix,omitempty" jsonschema:"Dewey prefix to filter by; empty returns all in scope"`
+	Project string `json:"project,omitempty" jsonschema:"accepted for consistency with the other tools; Dewey numbers are global, so it does not narrow the list"`
+	Prefix  string `json:"prefix,omitempty" jsonschema:"Dewey prefix to filter by; empty returns every taken number"`
 }
 
 type listDeweyOutput struct {
@@ -425,7 +425,7 @@ func registerTools(server *mcp.Server, pool *db.Pool) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "library_list_dewey",
-		Description: "List active Dewey numbers in scope for a project that start with a prefix.",
+		Description: "List every Dewey number already taken that starts with a prefix, in any project and whether active or retired. These are the codes library_add rejects.",
 		Annotations: &mcp.ToolAnnotations{
 			ReadOnlyHint:    true,
 			DestructiveHint: ptr(false),
@@ -433,7 +433,7 @@ func registerTools(server *mcp.Server, pool *db.Pool) {
 			OpenWorldHint:   ptr(false),
 		},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listDeweyInput) (*mcp.CallToolResult, listDeweyOutput, error) {
-		numbers, err := library.ListDeweyByPrefix(ctx, pool, in.Project, in.Prefix)
+		numbers, err := library.ListOccupiedDeweyByPrefix(ctx, pool, in.Prefix)
 		if err != nil {
 			return nil, listDeweyOutput{}, err
 		}
