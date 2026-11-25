@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/sophdn/library-mcp/internal/db"
 )
@@ -572,30 +573,147 @@ func ListOccupiedDeweyByPrefix(ctx context.Context, pool *db.Pool, prefix string
 
 // ── Find ──────────────────────────────────────────────────────────────
 
-// FindKeyword scans active entries for case-insensitive substring matches
-// against (in priority order): establishes, invoke_when, primary_author, tags,
-// index_pointer.question. Returns one KeywordMatch per matching entry.
+// KeywordHit is one keyword match with the full entry, so a caller can project
+// it to a KeywordMatch or a CompactEntry without a second read.
+type KeywordHit struct {
+	Entry        LibraryEntry
+	MatchedField string
+}
+
+// Match projects the hit onto the keyword-mode result row.
+func (h KeywordHit) Match() KeywordMatch {
+	return KeywordMatch{
+		Dewey:         h.Entry.Dewey,
+		PrimaryAuthor: h.Entry.Citation.PrimaryAuthor,
+		Year:          h.Entry.Citation.Year,
+		Establishes:   h.Entry.Establishes,
+		MatchedField:  h.MatchedField,
+	}
+}
+
+// FindKeyword returns one KeywordMatch per active entry that FindKeywordHits
+// matches.
 func FindKeyword(ctx context.Context, pool *db.Pool, projectID, q string) ([]KeywordMatch, error) {
+	hits, err := FindKeywordHits(ctx, pool, projectID, q)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]KeywordMatch, len(hits))
+	for i, h := range hits {
+		out[i] = h.Match()
+	}
+	return out, nil
+}
+
+// FindKeywordHits scans the active entries in scope for projectID. An entry
+// matches in one of two ways:
+//
+//  1. The whole query is a case-insensitive substring of (in priority order)
+//     establishes, invoke_when, primary_author, a tag, or an index-pointer
+//     question. MatchedField names the first such field. This is the original
+//     rule, kept so an existing hit never changes its label.
+//  2. Otherwise the query is split into letter/digit tokens, and EVERY token
+//     is a substring of at least one field, in any order. The searched fields
+//     are the five above plus what_it_answers and the raw citation, so author
+//     variants, years and title words are found. MatchedField names the first
+//     field, in that priority order, that contains any token.
+func FindKeywordHits(ctx context.Context, pool *db.Pool, projectID, q string) ([]KeywordHit, error) {
 	entries, err := ListActive(ctx, pool, projectID)
 	if err != nil {
 		return nil, err
 	}
 	qLower := strings.ToLower(q)
-	out := []KeywordMatch{}
+	tokens := keywordTokens(qLower)
+	out := []KeywordHit{}
 	for _, e := range entries {
 		field := keywordMatchField(e, qLower)
 		if field == "" {
+			field = tokenMatchField(e, tokens)
+		}
+		if field == "" {
 			continue
 		}
-		out = append(out, KeywordMatch{
-			Dewey:         e.Dewey,
-			PrimaryAuthor: e.Citation.PrimaryAuthor,
-			Year:          e.Citation.Year,
-			Establishes:   e.Establishes,
-			MatchedField:  field,
-		})
+		out = append(out, KeywordHit{Entry: e, MatchedField: field})
 	}
 	return out, nil
+}
+
+// keywordTokens splits a lowercased query into its letter/digit runs.
+func keywordTokens(qLower string) []string {
+	return strings.FieldsFunc(qLower, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+// keywordField is one searchable field of an entry, already lowercased.
+type keywordField struct {
+	name   string
+	values []string
+}
+
+// tokenFields lists the fields the per-token rule searches, in priority order.
+func tokenFields(e LibraryEntry) []keywordField {
+	lower := func(ss ...string) []string {
+		out := make([]string, len(ss))
+		for i, s := range ss {
+			out[i] = strings.ToLower(s)
+		}
+		return out
+	}
+	questions := make([]string, len(e.IndexPointers))
+	for i, p := range e.IndexPointers {
+		questions[i] = p.Question
+	}
+	return []keywordField{
+		{"establishes", lower(e.Establishes)},
+		{"invoke_when", lower(e.InvokeWhen)},
+		{"primary_author", lower(e.Citation.PrimaryAuthor)},
+		{"tags", lower(e.Tags...)},
+		{"index_pointer.question", lower(questions...)},
+		{"what_it_answers", lower(e.WhatItAnswers)},
+		{"citation", lower(e.Citation.Raw)},
+	}
+}
+
+func (f keywordField) contains(token string) bool {
+	for _, v := range f.values {
+		if strings.Contains(v, token) {
+			return true
+		}
+	}
+	return false
+}
+
+// tokenMatchField applies the per-token rule: every token must appear in some
+// field. It returns the first field (priority order) holding any token, or ""
+// when a token is missing everywhere or there are no tokens.
+func tokenMatchField(e LibraryEntry, tokens []string) string {
+	if len(tokens) == 0 {
+		return ""
+	}
+	fields := tokenFields(e)
+	for _, tok := range tokens {
+		if !anyFieldContains(fields, tok) {
+			return ""
+		}
+	}
+	for _, f := range fields {
+		for _, tok := range tokens {
+			if f.contains(tok) {
+				return f.name
+			}
+		}
+	}
+	return ""
+}
+
+func anyFieldContains(fields []keywordField, token string) bool {
+	for _, f := range fields {
+		if f.contains(token) {
+			return true
+		}
+	}
+	return false
 }
 
 func keywordMatchField(e LibraryEntry, qLower string) string {
@@ -622,11 +740,14 @@ func keywordMatchField(e LibraryEntry, qLower string) string {
 }
 
 // FindSemantic returns active entries with at least one index_pointer in the
-// given section.
+// given section. An empty section means every section: all in-scope entries.
 func FindSemantic(ctx context.Context, pool *db.Pool, projectID, section string) ([]LibraryEntry, error) {
 	entries, err := ListActive(ctx, pool, projectID)
 	if err != nil {
 		return nil, err
+	}
+	if section == "" {
+		return entries, nil
 	}
 	out := []LibraryEntry{}
 	for _, e := range entries {
@@ -846,6 +967,17 @@ func validateEntry(e LibraryEntry) error {
 	}
 	if strings.TrimSpace(e.Citation.PrimaryAuthor) == "" {
 		return fmt.Errorf("%w: citation.primary_author is required", ErrValidation)
+	}
+	// The three card-body fields are what make a card useful at lookup time,
+	// so every Add path (library_add and portable import) must supply them.
+	for _, f := range []struct{ name, value string }{
+		{"establishes", e.Establishes},
+		{"what_it_answers", e.WhatItAnswers},
+		{"invoke_when", e.InvokeWhen},
+	} {
+		if strings.TrimSpace(f.value) == "" {
+			return fmt.Errorf("%w: %s is required", ErrValidation, f.name)
+		}
 	}
 	for i, p := range e.IndexPointers {
 		if strings.TrimSpace(p.Question) == "" {

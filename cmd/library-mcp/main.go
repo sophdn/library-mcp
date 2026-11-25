@@ -128,16 +128,42 @@ type retireInput struct {
 
 type findInput struct {
 	Project string `json:"project,omitempty" jsonschema:"project scope; empty searches universal cards only"`
-	Mode    string `json:"mode" jsonschema:"one of keyword, semantic, manifest"`
-	Query   string `json:"query,omitempty" jsonschema:"search text; required for keyword mode"`
-	Section string `json:"section,omitempty" jsonschema:"section name; required for semantic and manifest modes"`
+	Mode    string `json:"mode,omitempty" jsonschema:"one of keyword, semantic, manifest; empty means keyword"`
+	Query   string `json:"query,omitempty" jsonschema:"search text; required for keyword mode. Every word must appear in some field of the card, in any order"`
+	Section string `json:"section,omitempty" jsonschema:"section name; required for manifest mode. For semantic mode, empty means every section"`
+	TopK    *int   `json:"top_k,omitempty" jsonschema:"result size, default 5, clamped to 1..20. It caps the every-section semantic listing, and compact rows are the default when it is above 3"`
+	Compact *bool  `json:"compact,omitempty" jsonschema:"return compact rows (dewey, title, establishes first line, status, matched_field) for keyword and semantic modes; default true when top_k is above 3. Use library_get for a full card"`
 }
 
 type findOutput struct {
 	Mode     string                  `json:"mode"`
+	Compact  bool                    `json:"compact,omitempty"`
+	Results  []library.CompactEntry  `json:"compact_results,omitempty"`
 	Keyword  []library.KeywordMatch  `json:"keyword_results,omitempty"`
 	Semantic []library.LibraryEntry  `json:"semantic_results,omitempty"`
 	Manifest []library.ManifestEntry `json:"manifest_results,omitempty"`
+}
+
+// Defaults and bounds for library_find's top_k, and the size above which
+// compact rows are the default.
+const (
+	defaultFindTopK  = 5
+	maxFindTopK      = 20
+	compactThreshold = 3
+)
+
+// findOptions resolves top_k (default 5, clamped to [1, 20]) and compact
+// (default true when top_k is above 3) from a findInput.
+func findOptions(in findInput) (topK int, compact bool) {
+	topK = defaultFindTopK
+	if in.TopK != nil {
+		topK = min(max(*in.TopK, 1), maxFindTopK)
+	}
+	compact = topK > compactThreshold
+	if in.Compact != nil {
+		compact = *in.Compact
+	}
+	return topK, compact
 }
 
 type crossRefInput struct {
@@ -202,7 +228,7 @@ func ptr[T any](v T) *T { return &v }
 func registerTools(server *mcp.Server, pool *db.Pool) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "library_add",
-		Description: "Add a card to the library under a globally unique Dewey number. Refuses a duplicate Dewey.",
+		Description: "Add a card to the library under a globally unique Dewey number. dewey, primary_author, citation_raw, establishes, what_it_answers and invoke_when are required. Refuses a duplicate Dewey.",
 		Annotations: &mcp.ToolAnnotations{
 			ReadOnlyHint:    false,
 			DestructiveHint: ptr(false),
@@ -279,7 +305,7 @@ func registerTools(server *mcp.Server, pool *db.Pool) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "library_find",
-		Description: "Search active cards. keyword mode substring-matches text; semantic and manifest modes filter by section (manifest returns slim rows).",
+		Description: "Search active cards. keyword mode (the default) matches every word of the query in any field; semantic mode filters by section (empty: every section); manifest mode returns slim rows for one section. keyword and semantic return compact rows by default.",
 		Annotations: &mcp.ToolAnnotations{
 			ReadOnlyHint:    true,
 			DestructiveHint: ptr(false),
@@ -287,37 +313,8 @@ func registerTools(server *mcp.Server, pool *db.Pool) {
 			OpenWorldHint:   ptr(false),
 		},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in findInput) (*mcp.CallToolResult, findOutput, error) {
-		switch in.Mode {
-		case "keyword":
-			if in.Query == "" {
-				return nil, findOutput{}, fmt.Errorf("library_find keyword mode requires query")
-			}
-			matches, err := library.FindKeyword(ctx, pool, in.Project, in.Query)
-			if err != nil {
-				return nil, findOutput{}, err
-			}
-			return nil, findOutput{Mode: "keyword", Keyword: matches}, nil
-		case "semantic":
-			if in.Section == "" {
-				return nil, findOutput{}, fmt.Errorf("library_find semantic mode requires section")
-			}
-			entries, err := library.FindSemantic(ctx, pool, in.Project, in.Section)
-			if err != nil {
-				return nil, findOutput{}, err
-			}
-			return nil, findOutput{Mode: "semantic", Semantic: entries}, nil
-		case "manifest":
-			if in.Section == "" {
-				return nil, findOutput{}, fmt.Errorf("library_find manifest mode requires section")
-			}
-			manifest, err := library.FindManifest(ctx, pool, in.Project, in.Section)
-			if err != nil {
-				return nil, findOutput{}, err
-			}
-			return nil, findOutput{Mode: "manifest", Manifest: manifest}, nil
-		default:
-			return nil, findOutput{}, fmt.Errorf("library_find mode must be keyword, semantic, or manifest")
-		}
+		out, err := find(ctx, pool, in)
+		return nil, out, err
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -439,4 +436,63 @@ func registerTools(server *mcp.Server, pool *db.Pool) {
 		}
 		return nil, listDeweyOutput{DeweyNumbers: numbers, Prefix: in.Prefix, Count: len(numbers)}, nil
 	})
+}
+
+// find implements library_find. An empty mode means keyword, so {query} alone
+// works. keyword needs a query; manifest needs a section; semantic takes an
+// optional section, and with none it lists every section's cards, capped at
+// top_k. keyword and semantic return compact rows unless compact is false.
+//
+// A keyword query that matches nothing returns no rows. This server has no
+// ranker, so it does not fall back to a semantic listing: an unranked list
+// would read as matches for an unrelated query.
+func find(ctx context.Context, pool *db.Pool, in findInput) (findOutput, error) {
+	topK, compact := findOptions(in)
+	switch in.Mode {
+	case "", "keyword":
+		if in.Query == "" {
+			return findOutput{}, fmt.Errorf("library_find keyword mode requires query")
+		}
+		hits, err := library.FindKeywordHits(ctx, pool, in.Project, in.Query)
+		if err != nil {
+			return findOutput{}, err
+		}
+		out := findOutput{Mode: "keyword", Compact: compact}
+		for _, h := range hits {
+			if compact {
+				out.Results = append(out.Results, library.Compact(h.Entry, h.MatchedField))
+			} else {
+				out.Keyword = append(out.Keyword, h.Match())
+			}
+		}
+		return out, nil
+	case "semantic":
+		entries, err := library.FindSemantic(ctx, pool, in.Project, in.Section)
+		if err != nil {
+			return findOutput{}, err
+		}
+		if in.Section == "" && len(entries) > topK {
+			entries = entries[:topK]
+		}
+		out := findOutput{Mode: "semantic", Compact: compact}
+		if !compact {
+			out.Semantic = entries
+			return out, nil
+		}
+		for _, e := range entries {
+			out.Results = append(out.Results, library.Compact(e, ""))
+		}
+		return out, nil
+	case "manifest":
+		if in.Section == "" {
+			return findOutput{}, fmt.Errorf("library_find manifest mode requires section")
+		}
+		manifest, err := library.FindManifest(ctx, pool, in.Project, in.Section)
+		if err != nil {
+			return findOutput{}, err
+		}
+		return findOutput{Mode: "manifest", Manifest: manifest}, nil
+	default:
+		return findOutput{}, fmt.Errorf("library_find mode must be keyword, semantic, or manifest")
+	}
 }

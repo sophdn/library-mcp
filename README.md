@@ -36,17 +36,40 @@ and its own database schema, so it builds and runs with nothing else attached.
 
 | Tool | What it does |
 | --- | --- |
-| `library_add` | Add a card under a new Dewey number. |
+| `library_add` | Add a card under a new Dewey number. `establishes`, `what_it_answers` and `invoke_when` are required. |
 | `library_get` | Fetch one card by Dewey. |
 | `library_update` | Change some fields of a card; Dewey stays fixed. |
 | `library_retire` | Retire a card with a reason. |
-| `library_find` | Search cards: `keyword` substring match, or `semantic` / `manifest` filter by section. |
+| `library_find` | Search cards. `keyword` (the default mode) matches every word of the query somewhere in a card. `semantic` filters by section, or lists every section when none is given. `manifest` returns slim rows for one section. Keyword and semantic results come back as compact rows unless you pass `compact: false`. |
 | `library_cross_reference` | Find cards that share a section, or a `(section, question)` pair. |
 | `library_reproject` | Change a card's project tags (`add`, `remove`, `set`). |
 | `library_list_active` | List active cards in scope for a project (its own plus universal). |
 | `library_list_all` | List every active card as slim rows. |
 | `library_list_sections` | List the section names a project's cards use. |
 | `library_list_dewey` | List Dewey numbers under a prefix. |
+
+### Contract changes
+
+These changes alter what a client sends or gets back.
+
+- `library_add` and portable import refuse a card with an empty
+  `establishes`, `what_it_answers` or `invoke_when`.
+- `library_find` defaults `mode` to `keyword`, so `{"query": "..."}` alone
+  works. A keyword query is split into words, and a card matches when every
+  word appears in at least one field, in any order. The fields searched now
+  include `what_it_answers` and the raw citation. A query that is a substring
+  of one field still matches as before and keeps its `matched_field` label.
+- `library_find` takes `top_k` (default 5, range 1 to 20) and `compact`.
+  When `top_k` is above 3, keyword and semantic results default to compact
+  rows in `compact_results`: `dewey`, `title` (the first line of the
+  citation), the first line of `establishes`, `status` and `matched_field`.
+  Pass `compact: false` for the full rows in `keyword_results` or
+  `semantic_results`. Manifest results are unchanged.
+- `library_find` in `semantic` mode no longer requires `section`. With none,
+  it lists cards from every section, capped at `top_k`.
+- A keyword query that matches nothing returns no rows. This server has no
+  ranker, so it does not fall back to a section listing that would look like
+  matches.
 
 ## Build and run
 
@@ -85,8 +108,8 @@ go test ./...
 The tests are hermetic. Each opens a fresh temporary database, so they need no
 server and no network.
 
-**Coverage:** the two logic packages hold a 95% floor **in aggregate** — 95.2%
-over the two (`internal/library` 95.5%, and `internal/db` 93.0% on its own).
+**Coverage:** the two logic packages hold a 95% floor **in aggregate** — 95.5%
+over the two (`internal/library` 95.7%, and `internal/db` 93.0% on its own).
 Reproduce with:
 
 ```sh
